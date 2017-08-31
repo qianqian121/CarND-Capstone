@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 
-import rospy
-from std_msgs.msg import Bool
-from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd, SteeringReport
-from geometry_msgs.msg import TwistStamped
 import math
+import rospy
+from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd, SteeringReport
+from geometry_msgs.msg import TwistStamped, PoseStamped
+from std_msgs.msg import Bool
 
 from twist_controller import Controller
+from yaw_controller import YawController
+from pid import PID
 
 '''
 You can build this node only after you have built (or partially built) the `waypoint_updater` node.
@@ -31,9 +33,10 @@ that we have created in the `__init__` function.
 
 '''
 
+
 class DBWNode(object):
     def __init__(self):
-        rospy.init_node('dbw_node')
+        rospy.init_node('dbw_node', log_level=rospy.DEBUG)
 
         vehicle_mass = rospy.get_param('~vehicle_mass', 1736.35)
         fuel_capacity = rospy.get_param('~fuel_capacity', 13.5)
@@ -53,15 +56,37 @@ class DBWNode(object):
         self.brake_pub = rospy.Publisher('/vehicle/brake_cmd',
                                          BrakeCmd, queue_size=1)
 
+        self.current_twist = None
+        self.target_twist = None
+
+        # FIXME: min speed ?
+        min_speed = 1.0
+
+        self.yaw_controller = YawController(wheel_base, steer_ratio, min_speed, max_lat_accel, max_steer_angle)
+
+        self.pid = PID(2, 0.01, 0.0)
+        # self.pid2 = PID(2, 0.01, 0.0)
+
         # TODO: Create `TwistController` object
         # self.controller = TwistController(<Arguments you wish to provide>)
 
         # TODO: Subscribe to all the topics you need to
+        rospy.Subscriber('/current_velocity', TwistStamped, self.current_cb)
+        rospy.Subscriber('/twist_cmd', TwistStamped, self.target_cb)
+        rospy.loginfo("Should be subscribed dbw node!")
 
         self.loop()
 
+    def current_cb(self, msg):
+        rospy.loginfo("Updating current twist!")
+        self.current_twist = msg
+
+    def target_cb(self, msg):
+        rospy.loginfo("Updating target twist!")
+        self.target_twist = msg
+
     def loop(self):
-        rate = rospy.Rate(50) # 50Hz
+        rate = rospy.Rate(30)  # 50Hz
         while not rospy.is_shutdown():
             # TODO: Get predicted throttle, brake, and steering using `twist_controller`
             # You should only publish the control commands if dbw is enabled
@@ -71,7 +96,38 @@ class DBWNode(object):
             #                                                     <dbw status>,
             #                                                     <any other argument you need>)
             # if <dbw is enabled>:
-            #   self.publish(throttle, brake, steer)
+            throttle = 0.00  # base throttle
+            brake = 0.0
+            steer = 0.0
+            if self.current_twist is None or self.target_twist is None:
+                rospy.loginfo("No incoming twist")
+                rate.sleep()
+                continue
+
+            current_velocity = self.current_twist.twist.linear.x
+            current_angular_velocity = self.current_twist.twist.angular.z
+            target_velocity = self.target_twist.twist.linear.x
+            target_angular_velocity = self.target_twist.twist.angular.z
+
+            steer = self.yaw_controller.get_steering(target_velocity, target_angular_velocity,
+                                                     current_velocity)
+
+            error = (target_velocity - current_velocity) / 12  # 8 m/s -> 17 mph
+
+            if error > 1:
+                error = 1
+            elif error < -1:
+                error = -1
+
+            throttle += self.pid.step(error, 0.02)
+            # When throttle is negative  we may apply brake
+            # brake += self.pid2.step(error, 0.02)
+
+            if current_velocity - target_velocity > 1 or throttle <= 0 or target_velocity <= 2:
+                throttle = 0
+                brake = 5000
+
+            self.publish(throttle, brake, steer)
             rate.sleep()
 
     def publish(self, throttle, brake, steer):
