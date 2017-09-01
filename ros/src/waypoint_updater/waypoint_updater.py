@@ -28,7 +28,7 @@ CRUISE = 0
 CROSS = 1
 STOP = 2
 RUN = 3
-CRUISE_SPEED = 12  # 12
+CRUISE_SPEED = 6  # 12
 CROSS_SPEED = 3
 RUN_SPEED = 12
 GO_STOP_N_WPS = 5
@@ -60,10 +60,15 @@ class WaypointUpdater(object):
         self.speed = None
 
         # lights and light wps
-        self.K = 4  # Number of crosses #FIXME: Update number of crosses
         self.light_wps_ids = []
         self.light_pos = [(1148.56, 1184.65), (1559.2, 1158.43), (2122.14, 1526.79), (2175.237, 1795.71),
                           (1493.29, 2947.67), (821.96, 2905.8), (161.76, 2303.82), (351.84, 1574.65)]
+        self.K = len(self.light_pos)  # Number of crosses
+
+        self.start_x_light = [1130.0, 1540.0, 2115.0, 2172.0, 1480.0, 815.0, 155.0, 345.0]
+        self.end_x_light = [1145.0, 1560.0, 2121.0, 2175.0, 1492.0, 821.0, 161.0, 351.0]
+        self.latency = 0  # wait x meters to get the first true outcome of the red light
+
         # state logic
         self.state = CRUISE
         self.cross_id = None
@@ -73,9 +78,8 @@ class WaypointUpdater(object):
         # stop
         self.stop = False
 
-        # camera light
-        # camera.light
-        self.cam_stop = False
+        # CV
+        self.cam_stop = True  # start red
         self.loop()
 
     def pose_cb(self, msg):
@@ -128,7 +132,7 @@ class WaypointUpdater(object):
         v0 = 2
         v = []
         for i in range(STOP_WPS):
-            v.append(v0 - v0 * i * 0.2 / float(STOP_WPS - 1))
+            v.append(v0 - v0 * i / float(STOP_WPS - 1))
         return v
 
     def nearest_cross_id(self):
@@ -138,7 +142,7 @@ class WaypointUpdater(object):
                                                 cross_wp.pose.pose.position.y,
                                                 self.current_pose.pose.position.x,
                                                 self.current_pose.pose.position.y)
-            if distance_to_start_cross < 50:  # meters
+            if distance_to_start_cross < 70:  # meters
                 return i
         return None
 
@@ -180,9 +184,21 @@ class WaypointUpdater(object):
                 wps[-1].twist.twist.linear.x = RUN_SPEED
         self.final_wps = wps
 
+    def in_camera_interval(self):
+        if self.cross_id is None:
+            rospy.logerr('what? no light id!')
+        x = self.current_pose.pose.position.x
+        if self.start_x_light[self.cross_id] + self.latency < x < self.end_x_light[self.cross_id]:
+            rospy.logerr('In camera range for light: %s', self.cross_id)
+            return True
+        rospy.logerr('Not in camera range')
+        return False
+
     def update_final_wps(self):
         if not self.init:
+            rospy.logerr('not init')
             return
+        # rospy.logerr('%s', self.state)
         self.update_state_values()
         if self.state == CRUISE:
             if self.cross_id is not None:
@@ -191,7 +207,8 @@ class WaypointUpdater(object):
                 return
         elif self.state == CROSS:
             # Add wps if going slow to stop_go_wp
-            if self.cross_distance() < 7:  # If we pass this mark either stop or run. Never go back to cross.
+            # if self.cross_distance() < 7:  # If we pass this mark either stop or run. Never go back to cross.
+            if self.in_camera_interval():  # If we pass this mark either stop or run. Never go back to cross.
                 if not self.cam_stop:
                     self.state = RUN
                     rospy.logerr("Green light switching to RUN- take off!")

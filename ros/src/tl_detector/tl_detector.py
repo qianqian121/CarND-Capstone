@@ -13,6 +13,8 @@ from traffic_light_config import config
 
 STATE_COUNT_THRESHOLD = 3
 
+RED_THRESHOLD = 19
+
 
 class TLDetector(object):
     def __init__(self):
@@ -42,18 +44,29 @@ class TLDetector(object):
         self.y = None
         self.counter = 0
 
-        # FIXME: Only 4 traffic lights so far (the one that works with the sim)
+        #
+        # 'light_positions': [
+        #     (1148.56, 1184.65),
+        #     (1559.2, 1158.43),
+        #     (2122.14, 1526.79),
+        #     (2175.237, 1795.71),
+        #     (1493.29, 2947.67),
+        #     (821.96, 2905.8),
+        #     (161.76, 2303.82),
+        #     (351.84, 1574.65)
 
-        self.start_x_light = [1130.0, 1540.0, 2122.0, 2172.0]
-        self.end_x_light = [1145.0, 1550.0, 2125.0, 2175.0]
-        self.start_y_light = [1183.0, 1173.0, 1451.0, 1723.0]
-        self.end_y_light = [1184.0, 1161.0, 1532.0, 1790.0]
-        self.tol = 0.5
+        self.start_x_light = [1130.0, 1540.0, 2115.0, 2172.0, 1480.0, 815.0, 155.0, 345.0]
+        self.end_x_light = [1145.0, 1560.0, 2121.0, 2175.0, 1492.0, 821.0, 161.0, 351.0]
+        self.start_y_light = [1183.0, 1150.0, 1470.0, 1723.0, 2900.0, 2890.0, 2280.0, 1550.0]
+        self.end_y_light = [1184.0, 1173.0, 1550.0, 1790.0, 3000.0, 2920.0, 2320.0, 1590.0]
+        self.tol = 5 # 5 meters tolerance will serve for classificator lag/latency
 
-        self.crop_1_x = [300, 340, 320, 250]
-        self.crop_2_x = [500, 480, 500, 680]
-        self.crop_1_y = [200, 300, 200, 100]
-        self.crop_2_y = [350, 450, 500, 500]
+        self.crop_1_x = [310, 340, 320, 250, 000, 000, 000, 000]
+        self.crop_2_x = [490, 480, 700, 680, 800, 800, 800, 800]
+        self.crop_1_y = [180, 100, 100, 100, 000, 000, 000, 000]
+        self.crop_2_y = [350, 550, 500, 500, 500, 600, 600, 600]
+
+        self.first = True
 
         rospy.spin()
 
@@ -73,6 +86,9 @@ class TLDetector(object):
         l_id = self.near_light_id()
         if l_id is None:
             return
+        if self.first:
+            self.first = False  # First image is black!
+            return
         try:
             img = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
             roi = img[self.crop_1_y[l_id]:self.crop_2_y[l_id], self.crop_1_x[l_id]:self.crop_2_x[l_id]]
@@ -80,15 +96,19 @@ class TLDetector(object):
             #     '/home/crised/sdcnd/term3/CarND-Capstone/pics2/' + str(self.counter) + '_' + str(self.x) + '_' + str(
             #         self.y) + '_' + str(l_id) + '.jpeg', roi)
             self.counter += 1
-            reds = self.red_count_enough(roi)
-            if reds:
-                # rospy.logerr('got red light')
+            reds = self.red_count(roi)
+            if reds >= RED_THRESHOLD:
+                self.upcoming_red_light_pub.publish(Int32(1))
+                rospy.logerr('red light')
                 # cv2.imwrite(
                 #     '/home/crised/sdcnd/term3/CarND-Capstone/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
-                #         self.y) + '_' + str(l_id) + '_' + str(self.red_count(roi)) + '.jpeg', roi)
-                # self.counter += 1
-                self.upcoming_red_light_pub.publish(Int32(1))
+                #         self.y) + '_' + str(l_id) + '_' + str(reds) + '_RED' + '.jpeg', roi)
+                self.counter += 1
             else:
+                rospy.logerr('green light?')
+                # cv2.imwrite(
+                #     '/home/crised/sdcnd/term3/CarND-Capstone/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
+                #         self.y) + '_' + str(l_id) + '_' + str(reds) + '_GREEN' + '.jpeg', roi)
                 self.upcoming_red_light_pub.publish(Int32(-1))
         except CvBridgeError, e:
             rospy.logerr('error %s', e)
@@ -105,7 +125,7 @@ class TLDetector(object):
         return None
 
     # The quality must be set to Fantastic in the simulator!
-    def red_count_enough(self, img):
+    def red_count(self, img):
         height, width, _ = img.shape
         count = 0
         for i in range(height):
@@ -118,15 +138,16 @@ class TLDetector(object):
                 r = int(img[i][j][2])
                 # if r > 220 and g < 70 and b < 50:
                 # if b > 200 and g < 110 and r < 105:
-                if b > 200 and g < 110 and r < 105:
+                # if b > 200 and g < 110 and r < 105:
+                # if b > 170 and g < 70:
+                if b > 165 and g < 80 and r < 80:
+                    # if b > 200 and g < 80 and r < 80:
                     count += 1
-                    if count > 7:
-                        rospy.logerr('red points: %s', count)
-                        return True
-        rospy.logerr('red points: %s', count)
-        if count == 0:
-            return False
-        return True
+                    if count > RED_THRESHOLD:  # early stop
+                        rospy.logerr('points: %s', count)
+                        return count
+        rospy.logerr('points: %s', count)
+        return count
 
 
 if __name__ == '__main__':

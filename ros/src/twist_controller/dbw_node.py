@@ -112,7 +112,7 @@ class DBWNode(object):
             steer = self.yaw_controller.get_steering(target_velocity, target_angular_velocity,
                                                      current_velocity)
 
-            error = (target_velocity - current_velocity) / 12  # 8 m/s -> 17 mph
+            error = (target_velocity - current_velocity) / 7  # 8 m/s -> 17 mph
 
             if error > 1:
                 error = 1
