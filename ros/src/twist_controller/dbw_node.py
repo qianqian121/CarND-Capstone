@@ -65,7 +65,6 @@ class DBWNode(object):
         self.yaw_controller = YawController(wheel_base, steer_ratio, min_speed, max_lat_accel, max_steer_angle)
 
         self.pid = PID(2, 0.01, 0.0)
-        # self.pid2 = PID(2, 0.01, 0.0)
 
         # TODO: Create `TwistController` object
         # self.controller = TwistController(<Arguments you wish to provide>)
@@ -111,8 +110,14 @@ class DBWNode(object):
 
             steer = self.yaw_controller.get_steering(target_velocity, target_angular_velocity,
                                                      current_velocity)
+            if abs(current_angular_velocity) > 0.05:
+                steer += steer
+                if abs(current_angular_velocity) > 1:
+                    rospy.logerr("Hard Steering: %s",
+                                 current_angular_velocity)
+                    steer += steer
 
-            error = (target_velocity - current_velocity) / 7  # 8 m/s -> 17 mph
+            error = (target_velocity - current_velocity) / 6  # 8 m/s -> 17 mph
 
             if error > 1:
                 error = 1
@@ -122,10 +127,13 @@ class DBWNode(object):
             throttle += self.pid.step(error, 0.02)
             # When throttle is negative  we may apply brake
             # brake += self.pid2.step(error, 0.02)
+            # rospy.logerr("Current Velocity %s, Target Velocity %s", current_velocity, target_velocity)
 
             if current_velocity - target_velocity > 1 or throttle <= 0 or target_velocity <= 2:
                 throttle = 0
-                brake = 5000
+                brake = 5000  # 20000 is apparent max
+
+            # rospy.logerr("Throttle %s, Brake %s", throttle, brake)
 
             self.publish(throttle, brake, steer)
             rate.sleep()
