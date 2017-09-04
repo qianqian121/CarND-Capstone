@@ -1,27 +1,12 @@
 #!/usr/bin/env python
 
-import rospy
-from styx_msgs.msg import Lane, Waypoint, TrafficLight, TrafficLightArray
 import copy
-from geometry_msgs.msg import TwistStamped, PoseStamped
-from std_msgs.msg import Int32
-
 import math
 
-'''
-This node will publish waypoints from the car's current position to some `x` distance ahead.
-
-As mentioned in the doc, you should ideally first implement a version which does not care
-about traffic lights or obstacles.
-
-Once you have created dbw_node, you will update this node to use the status of traffic lights too.
-
-Please note that our simulator also provides the exact location of traffic lights and their
-current status in `/vehicle/traffic_lights` message. You can use this message to build this node
-as well as to verify your TL classifier.
-
-TODO (for Yousuf and Aaron): Stopline location for each traffic light.
-'''
+import rospy
+from geometry_msgs.msg import TwistStamped, PoseStamped
+from std_msgs.msg import Int32
+from styx_msgs.msg import Lane
 
 LOOKAHEAD_WPS = 200  # Number of waypoints we will publish. You can change this number
 CRUISE = 0
@@ -33,7 +18,7 @@ CROSS_SPEED = 3
 RUN_SPEED = 8
 GO_STOP_N_WPS = 5
 SPEED_THRESHOLD = 1
-STOP_WPS = 100  # Fixed length stop waypoint
+STOP_WPS = 100  # Fixed length stop waypoints speeds
 
 
 class WaypointUpdater(object):
@@ -81,6 +66,13 @@ class WaypointUpdater(object):
 
         # CV
         self.cam_stop = True  # start red
+
+        # for debug messages
+        self.counter = 0
+
+        self.stop_speeds = []  # list of 100 WPS speeds
+        self.calculate_stop_speeds()
+
         self.loop()
 
     def pose_cb(self, msg):
@@ -130,29 +122,12 @@ class WaypointUpdater(object):
                 light_pos_y))
 
     # Fix exact stop waypoint for each traffic light
-    def get_approach_speeds(self):
-        # FIXME: Reviewer, please see there seems to be a bug here, no matter what decreasing speeds I choose:
-        # `self.target_twist.twist.linear.x` in dbw node will always be the speed of the first value of this list.
-        # I want to reach
+    def calculate_stop_speeds(self):
         v0 = CROSS_SPEED
-        v = []
-        m = self.white_line_wp[self.cross_id] - self.car_wp
-        # if m < 0:
-        #     rospy.logerr(" BAD WHITE LINE WP")
-        #     for i in range(STOP_WPS):
-        #         v.append(v0 - v0 * i / float(STOP_WPS - 1))
-        # else:
-        #     for i in range(m):
-        #         speed = v0 - v0 * i * 1.5 / float(m - 1)
-        #         if speed < 0.1:
-        #             speed = 0.0
-        #         v.append(speed)
-        #     for i in range(LOOKAHEAD_WPS - m):
-        #         v.append(0.0)  # pad with 0s
-        for i in range(m):
-            v.append(0.0)  # Trick speed, to solve this 'bug'
-        # rospy.logerr("STOP speeds: %s", str(v))
-        return v
+        for i in range(STOP_WPS):
+            speed = v0 - v0 * i / float(STOP_WPS - 1)
+            self.stop_speeds.append(speed)
+        rospy.logerr("STOP speeds: %s", str(self.stop_speeds))
 
     def nearest_cross_id(self):
         for i in range(self.K):
@@ -191,13 +166,13 @@ class WaypointUpdater(object):
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
                 wps[-1].twist.twist.linear.x = CROSS_SPEED
         elif self.state == STOP:
-            speeds = self.get_approach_speeds()
-            for i in range(len(speeds)):
+            m = self.white_line_wp[self.cross_id] - self.car_wp
+            if m < 0:
+                rospy.logerr("Error, in stop mode, m<0, passed cross?")
+            for i in range(m):
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
-                wps[-1].twist.twist.linear.x = speeds[i]
-                # rospy.logerr("Stop speed: %s ", wps[-1].twist.twist.linear.x)
-                # for wp in wps:
-                #     rospy.logerr('stop wp speeds: : %s %s', wp.twist.twist.linear.x, wp.twist.twist.linear.y)
+                wps[-1].twist.twist.linear.x = self.stop_speeds[STOP_WPS - m + i]
+            rospy.logerr('First stop wp speed: : %s', wps[0].twist.twist.linear.x)
         elif self.state == RUN:
             for i in range(LOOKAHEAD_WPS):  # cross mode ENDS at stop_wp
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
@@ -208,8 +183,8 @@ class WaypointUpdater(object):
         if self.cross_id is None:
             rospy.logerr('what? no light id!')
         x = self.current_pose.pose.position.x
-        margin = 1
-        if self.speed < 0.5: # First light
+        margin = 0
+        if self.speed < 0.5:  # First light
             margin = 13
         if self.start_x_light[self.cross_id] + margin < x < self.end_x_light[self.cross_id]:
             rospy.logerr('In camera range for light: %s', self.cross_id)
@@ -222,15 +197,14 @@ class WaypointUpdater(object):
             rospy.logerr('not init')
             return
         self.update_state_values()
-        rospy.logerr('wp: %s', self.car_wp)
+        if self.counter % 10 == 0:
+            rospy.logerr('wp: %s', self.car_wp)
         if self.state == CRUISE:
             if self.cross_id is not None:
                 self.state = CROSS
                 rospy.logerr("Switching from Cruise to Near Cross")
                 return
         elif self.state == CROSS:
-            # Add wps if going slow to stop_go_wp
-            # if self.cross_distance() < 7:  # If we pass this mark either stop or run. Never go back to cross.
             if self.in_camera_interval():  # If we pass this mark either stop or run. Never go back to cross.
                 if not self.cam_stop:
                     self.state = RUN
@@ -245,10 +219,6 @@ class WaypointUpdater(object):
                 rospy.logerr("Green light, takeoff!")
                 self.state = RUN
                 return
-            if self.stop:
-                # rospy.logerr("Stop mode, light id: %s", self.cross_id)
-                return
-            self.stop = True
         elif self.state == RUN:
             self.stop = False
             if self.cross_id is None:
@@ -261,6 +231,7 @@ class WaypointUpdater(object):
         """Publish the final waypoints."""
         rate = rospy.Rate(50)
         while not rospy.is_shutdown():
+            self.counter += 1
             self.update_final_wps()
             if self.final_wps is not None:
                 lane = Lane()

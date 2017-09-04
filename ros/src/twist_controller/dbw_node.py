@@ -74,6 +74,8 @@ class DBWNode(object):
         rospy.Subscriber('/twist_cmd', TwistStamped, self.target_cb)
         rospy.loginfo("Should be subscribed dbw node!")
 
+        self.counter = 0
+
         self.loop()
 
     def current_cb(self, msg):
@@ -127,14 +129,15 @@ class DBWNode(object):
             throttle += self.pid.step(error, 0.02)
             # When throttle is negative  we may apply brake
             # brake += self.pid2.step(error, 0.02)
-            # rospy.logerr("Current Velocity %s, Target Velocity %s", current_velocity, target_velocity)
 
-            if current_velocity - target_velocity > 1 or throttle <= 0 or target_velocity <= 2:
+            if current_velocity - target_velocity > 1 or throttle <= 0:  # or target_velocity <= 2
                 throttle = 0
                 brake = 5000  # 20000 is apparent max
 
-            # rospy.logerr("Throttle %s, Brake %s", throttle, brake)
-
+            if self.counter % 10 == 0:
+                rospy.logerr("Current Velocity %s, Target Velocity %s, Throttle %s, Brake %s", current_velocity,
+                             target_velocity, throttle, brake)
+            self.counter += 1
             self.publish(throttle, brake, steer)
             rate.sleep()
 
