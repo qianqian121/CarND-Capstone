@@ -44,12 +44,12 @@ class TLDetector(object):
         self.y = None
         self.counter = 0
 
-        self.start_x_light = [1130.0, 1540.0, 2115.0, 2170.0, 1480.0, 815.0, 155.0, 345.0]
+        self.start_x_light = [1130.0, 1545.0, 2119.0, 2173.0, 1480.0, 815.0, 155.0, 345.0]
         self.end_x_light = [1145.0, 1560.0, 2121.0, 2175.0, 1492.0, 821.0, 161.0, 351.0]
         self.start_y_light = [1183.0, 1150.0, 1470.0, 1723.0, 2900.0, 2890.0, 2280.0, 1550.0]
         self.end_y_light = [1184.0, 1173.0, 1550.0, 1790.0, 3000.0, 2920.0, 2320.0, 1590.0]
-        self.pre = 2
-        self.pos = 3  # 5 meters tolerance will serve for classificator lag/latency
+        self.pre = 0.2
+        self.pos = 1  # 5 meters tolerance will serve for classificator lag/latency
         self.y_tol = 10
 
         self.crop_1_x = [310, 340, 320, 250, 000, 000, 000, 000]
@@ -76,9 +76,10 @@ class TLDetector(object):
             return
         l_id = self.near_light_id()
         if l_id is None:
+            # self.upcoming_red_light_pub.publish(Int32(0)) If there is no information
             return
         if self.first:
-            self.first = False  # First image is black!
+            self.first = False  # First image from sim is black!
             return
         try:
             img = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
@@ -116,9 +117,6 @@ class TLDetector(object):
         count = 0
         for i in range(height):
             for j in range(width):
-                # r = int(img[i][j][0])
-                # g = int(img[i][j][1])
-                # b = int(img[i][j][2])
                 b = int(img[i][j][0])
                 g = int(img[i][j][1])
                 r = int(img[i][j][2])

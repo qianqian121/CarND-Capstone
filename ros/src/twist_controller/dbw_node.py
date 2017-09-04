@@ -114,10 +114,11 @@ class DBWNode(object):
                                                      current_velocity)
             if abs(current_angular_velocity) > 0.05:
                 steer += steer
-                if abs(current_angular_velocity) > 1:
+                if abs(current_angular_velocity) > 1 and self.counter % 7 == 0: # make this correction every 10 times at most
                     rospy.logerr("Hard Steering: %s",
                                  current_angular_velocity)
                     steer += steer
+
 
             error = (target_velocity - current_velocity) / 6  # 8 m/s -> 17 mph
 
@@ -133,10 +134,13 @@ class DBWNode(object):
             if current_velocity - target_velocity > 1 or throttle <= 0:  # or target_velocity <= 2
                 throttle = 0
                 brake = 5000  # 20000 is apparent max
+                # brake = 15000  # 20000 is apparent max
 
-            if self.counter % 10 == 0:
-                rospy.logerr("Current Velocity %s, Target Velocity %s, Throttle %s, Brake %s", current_velocity,
-                             target_velocity, throttle, brake)
+            # if self.counter % 10 == 0:
+            #     rospy.logerr("Current Velocity %s, Target Velocity %s, Throttle %s, Brake %s", current_velocity,
+            #                  target_velocity, throttle, brake)
+            if target_velocity < 0.06:
+                brake = 20000
             self.counter += 1
             self.publish(throttle, brake, steer)
             rate.sleep()

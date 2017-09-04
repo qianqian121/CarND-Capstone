@@ -2,7 +2,7 @@
 
 import copy
 import math
-
+import time
 import rospy
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from std_msgs.msg import Int32
@@ -50,7 +50,7 @@ class WaypointUpdater(object):
                           (1493.29, 2947.67), (821.96, 2905.8), (161.76, 2303.82), (351.84, 1574.65)]
         self.K = len(self.light_pos)  # Number of crosses
 
-        self.start_x_light = [1130.0, 1540.0, 2115.0, 2170.0, 1480.0, 815.0, 155.0, 345.0]
+        self.start_x_light = [1130.0, 1545.0, 2119.0, 2173.0, 1480.0, 815.0, 155.0, 345.0]
         self.end_x_light = [1145.0, 1560.0, 2121.0, 2175.0, 1492.0, 821.0, 161.0, 351.0]
 
         # state logic
@@ -62,10 +62,12 @@ class WaypointUpdater(object):
         # stop
         self.stop = False
 
-        self.white_line_wp = [291, 748, 2020, 2562, 2600, 2600, 2600, 2600]
+        self.white_line_wp_id = [291, 753, 2040, 2562, 2600, 2600, 2600, 2600]
 
         # CV
         self.cam_stop = True  # start red
+        self.first_green_after_red = False
+        self.last_traffic_update = None
 
         # for debug messages
         self.counter = 0
@@ -91,14 +93,31 @@ class WaypointUpdater(object):
         self.speed = msg.twist.linear.x
 
     def traffic_cb(self, msg):
+        self.last_traffic_update = time.clock()
         if int(msg.data) == 1:
             self.cam_stop = True
             # rospy.logerr('red light')
         else:
             # rospy.logerr('green light')
+            if self.cam_stop:
+                self.first_green_after_red = True  # Start only after the first Green - Latency issues.
+            else:
+                self.first_green_after_red = False
             self.cam_stop = False
         if self.wps is not None and self.current_pose is not None:
             self.init = True
+
+    def is_traffic_fresh(self):
+        if time.clock() - self.last_traffic_update < 1:
+            return True
+        rospy.logerr("Stale traffic light info")
+        return False
+
+    def close_to_white_lane(self):
+        if abs(self.car_wp - self.white_line_wp_id[self.cross_id]) < 20:
+            return True
+        rospy.logerr("We're not near white line yet")
+        return False
 
     def dist(self, a_x, a_y, b_x, b_y):
         return math.sqrt((a_x - b_x) ** 2 + (a_y - b_y) ** 2)
@@ -127,7 +146,7 @@ class WaypointUpdater(object):
         for i in range(STOP_WPS):
             speed = v0 - v0 * i / float(STOP_WPS - 1)
             self.stop_speeds.append(speed)
-        rospy.logerr("STOP speeds: %s", str(self.stop_speeds))
+        # rospy.logerr("STOP speeds: %s", str(self.stop_speeds))
 
     def nearest_cross_id(self):
         for i in range(self.K):
@@ -166,13 +185,14 @@ class WaypointUpdater(object):
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
                 wps[-1].twist.twist.linear.x = CROSS_SPEED
         elif self.state == STOP:
-            m = self.white_line_wp[self.cross_id] - self.car_wp
-            if m < 0:
+            m = self.white_line_wp_id[self.cross_id] - self.car_wp
+            if m <= 0:
                 rospy.logerr("Error, in stop mode, m<0, passed cross?")
+                return
             for i in range(m):
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
                 wps[-1].twist.twist.linear.x = self.stop_speeds[STOP_WPS - m + i]
-            rospy.logerr('First stop wp speed: : %s', wps[0].twist.twist.linear.x)
+            # rospy.logerr('First stop wp speed: : %s', wps[0].twist.twist.linear.x)
         elif self.state == RUN:
             for i in range(LOOKAHEAD_WPS):  # cross mode ENDS at stop_wp
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
@@ -215,8 +235,9 @@ class WaypointUpdater(object):
                     rospy.logerr("Switching to stop mode")
                     return
         elif self.state == STOP:
-            if not self.cam_stop:
-                rospy.logerr("Green light, takeoff!")
+            # if not self.cam_stop:
+            if self.first_green_after_red and self.is_traffic_fresh() and self.close_to_white_lane():
+                rospy.logerr("First Green light, takeoff!")
                 self.state = RUN
                 return
         elif self.state == RUN:
