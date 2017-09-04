@@ -112,13 +112,13 @@ class DBWNode(object):
 
             steer = self.yaw_controller.get_steering(target_velocity, target_angular_velocity,
                                                      current_velocity)
-            if abs(current_angular_velocity) > 0.05:
-                steer += steer
-                if abs(current_angular_velocity) > 1 and self.counter % 7 == 0: # make this correction every 10 times at most
-                    rospy.logerr("Hard Steering: %s",
-                                 current_angular_velocity)
-                    steer += steer
 
+            if abs(target_angular_velocity - current_angular_velocity > 0.7) or abs(
+                    current_angular_velocity) > 1 and self.counter % 4 == 0:
+                rospy.logerr("Hard Steering, current: %s, target:%s delta: %s",
+                             current_angular_velocity, target_angular_velocity,
+                             abs(current_angular_velocity - target_angular_velocity))
+                steer *= 5
 
             error = (target_velocity - current_velocity) / 6  # 8 m/s -> 17 mph
 

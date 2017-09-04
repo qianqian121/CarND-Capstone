@@ -26,18 +26,8 @@ class TLDetector(object):
 
         sub1 = rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
         sub2 = rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
-
-        '''
-        /vehicle/traffic_lights helps you acquire an accurate ground truth data source for the traffic light
-        classifier, providing the location and current color state of all traffic lights in the
-        simulator. This state can be used to generate classified images or subbed into your solution to
-        help you work on another single component of the node. This topic won't be available when
-        testing your solution in real life so don't rely on it in the final submission.
-        '''
         sub6 = rospy.Subscriber('/camera/image_raw', Image, self.image_cb)
-
         self.upcoming_red_light_pub = rospy.Publisher('/traffic_waypoint', Int32, queue_size=1)
-
         self.bridge = CvBridge()
 
         self.x = None
@@ -52,10 +42,10 @@ class TLDetector(object):
         self.pos = 1  # 5 meters tolerance will serve for classificator lag/latency
         self.y_tol = 10
 
-        self.crop_1_x = [310, 340, 320, 250, 000, 000, 000, 000]
-        self.crop_2_x = [490, 480, 700, 680, 800, 800, 800, 800]
-        self.crop_1_y = [180, 100, 100, 100, 000, 000, 000, 000]
-        self.crop_2_y = [350, 550, 500, 500, 500, 600, 600, 600]
+        self.crop_1_x = [360, 300, 340, 330, 000, 000, 000, 000]
+        self.crop_2_x = [470, 440, 680, 660, 800, 800, 800, 800]
+        self.crop_1_y = [220, 210, 220, 180, 000, 000, 000, 000]
+        self.crop_2_y = [345, 400, 380, 340, 500, 600, 600, 600]
 
         self.first = True
 
@@ -91,7 +81,7 @@ class TLDetector(object):
                 # cv2.imwrite(
                 # '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
                 #     self.y) + '_' + str(l_id) + '_' + str(reds) + '_RED' + '.jpeg', roi)
-                # self.counter += 1
+                self.counter += 1
             else:
                 # cv2.imwrite(
                 #     '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(

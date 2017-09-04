@@ -3,6 +3,7 @@
 import copy
 import math
 import time
+
 import rospy
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from std_msgs.msg import Int32
@@ -16,7 +17,6 @@ RUN = 3
 CRUISE_SPEED = 6  # 12
 CROSS_SPEED = 3
 RUN_SPEED = 8
-GO_STOP_N_WPS = 5
 SPEED_THRESHOLD = 1
 STOP_WPS = 100  # Fixed length stop waypoints speeds
 
@@ -32,9 +32,7 @@ class WaypointUpdater(object):
         rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
         rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
         rospy.Subscriber('/current_velocity', TwistStamped, self.current_cb)
-
         rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
-
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
 
         self.init = False
@@ -49,7 +47,6 @@ class WaypointUpdater(object):
         self.light_pos = [(1148.56, 1184.65), (1559.2, 1158.43), (2122.14, 1526.79), (2175.237, 1795.71),
                           (1493.29, 2947.67), (821.96, 2905.8), (161.76, 2303.82), (351.84, 1574.65)]
         self.K = len(self.light_pos)  # Number of crosses
-
         self.start_x_light = [1130.0, 1545.0, 2119.0, 2173.0, 1480.0, 815.0, 155.0, 345.0]
         self.end_x_light = [1145.0, 1560.0, 2121.0, 2175.0, 1492.0, 821.0, 161.0, 351.0]
 
@@ -61,8 +58,7 @@ class WaypointUpdater(object):
 
         # stop
         self.stop = False
-
-        self.white_line_wp_id = [291, 753, 2040, 2562, 2600, 2600, 2600, 2600]
+        self.white_line_wp_id = [291, 753, 2040, 2570, 2600, 2600, 2600, 2600]
 
         # CV
         self.cam_stop = True  # start red
@@ -107,8 +103,18 @@ class WaypointUpdater(object):
         if self.wps is not None and self.current_pose is not None:
             self.init = True
 
+    @staticmethod
+    def dist(a_x, a_y, b_x, b_y):
+        return math.sqrt((a_x - b_x) ** 2 + (a_y - b_y) ** 2)
+
+    def calculate_stop_speeds(self):
+        v0 = CROSS_SPEED
+        for i in range(STOP_WPS):
+            speed = v0 - v0 * i / float(STOP_WPS - 1)
+            self.stop_speeds.append(speed)
+
     def is_traffic_fresh(self):
-        if time.clock() - self.last_traffic_update < 1:
+        if time.clock() - self.last_traffic_update < 0.3:  # with 1 it was never stale
             return True
         rospy.logerr("Stale traffic light info")
         return False
@@ -119,11 +125,8 @@ class WaypointUpdater(object):
         rospy.logerr("We're not near white line yet")
         return False
 
-    def dist(self, a_x, a_y, b_x, b_y):
-        return math.sqrt((a_x - b_x) ** 2 + (a_y - b_y) ** 2)
-
     def get_closest_wp_index(self, x, y):
-        max_distance_so_far = 50000  # 50000 meters away
+        max_distance_so_far = 100  # 50000 meters away
         best_i = None
         for i in range(self.N):
             wp = self.wps.waypoints[i]
@@ -139,14 +142,6 @@ class WaypointUpdater(object):
             self.light_wps_ids.append(self.get_closest_wp_index(
                 light_pos_x,
                 light_pos_y))
-
-    # Fix exact stop waypoint for each traffic light
-    def calculate_stop_speeds(self):
-        v0 = CROSS_SPEED
-        for i in range(STOP_WPS):
-            speed = v0 - v0 * i / float(STOP_WPS - 1)
-            self.stop_speeds.append(speed)
-        # rospy.logerr("STOP speeds: %s", str(self.stop_speeds))
 
     def nearest_cross_id(self):
         for i in range(self.K):
@@ -192,7 +187,6 @@ class WaypointUpdater(object):
             for i in range(m):
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
                 wps[-1].twist.twist.linear.x = self.stop_speeds[STOP_WPS - m + i]
-            # rospy.logerr('First stop wp speed: : %s', wps[0].twist.twist.linear.x)
         elif self.state == RUN:
             for i in range(LOOKAHEAD_WPS):  # cross mode ENDS at stop_wp
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
@@ -209,7 +203,6 @@ class WaypointUpdater(object):
         if self.start_x_light[self.cross_id] + margin < x < self.end_x_light[self.cross_id]:
             rospy.logerr('In camera range for light: %s', self.cross_id)
             return True
-        # rospy.logerr('Not in camera range')
         return False
 
     def update_final_wps(self):
