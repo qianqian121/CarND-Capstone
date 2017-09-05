@@ -47,7 +47,7 @@ class WaypointUpdater(object):
         self.light_pos = [(1148.56, 1184.65), (1559.2, 1158.43), (2122.14, 1526.79), (2175.237, 1795.71),
                           (1493.29, 2947.67), (821.96, 2905.8), (161.76, 2303.82), (351.84, 1574.65)]
         self.K = len(self.light_pos)  # Number of crosses
-        self.start_x_light = [1130.0, 1545.0, 2119.0, 2173.0, 1470.0, 815.0, 155.0, 345.0]
+        self.start_x_light = [1130.0, 1545.0, 2119.0, 2170.0, 1470.0, 815.0, 155.0, 345.0]
         self.end_x_light = [1145.0, 1560.0, 2121.0, 2175.0, 1492.0, 821.0, 161.0, 351.0]
 
         # state logic
@@ -58,12 +58,13 @@ class WaypointUpdater(object):
 
         # stop
         self.stop = False
-        self.white_line_wp_id = [291, 753, 2040, 2570, 2600, 2600, 2600, 2600]
+        self.white_line_wp_id = [291, 753, 2040, 2573, 2600, 2600, 2600, 2600]
 
         # CV
         self.cam_stop = True  # start red
         self.first_green_after_red = False
         self.last_traffic_update = None
+        self.last_wp_tl = None
 
         # for debug messages
         self.counter = 0
@@ -90,6 +91,7 @@ class WaypointUpdater(object):
 
     def traffic_cb(self, msg):
         self.last_traffic_update = time.clock()
+        self.last_wp_tl = self.car_wp
         if int(msg.data) == 1:
             self.cam_stop = True
             # rospy.logerr('red light')
@@ -117,6 +119,12 @@ class WaypointUpdater(object):
         if time.clock() - self.last_traffic_update < 0.3:  # with 1 it was never stale
             return True
         rospy.logerr("Stale traffic light info")
+        return False
+
+    def is_traffic_info_same_wp(self):
+        if self.car_wp == self.last_wp_tl:
+            return True  # Only pay attentions to traffic information coming in the same wp
+        rospy.logerr("Waay past CVs, car wp: %s, tl cv wp: %s", self.car_wp, self.last_wp_tl)
         return False
 
     def close_to_white_lane(self):
@@ -205,6 +213,13 @@ class WaypointUpdater(object):
             return True
         return False
 
+    def is_really_green(self):
+        return self.first_green_after_red and self.is_traffic_fresh() \
+               and self.close_to_white_lane() and self.is_traffic_info_same_wp() and not self.cam_stop
+
+    def is_really_red(self):
+        return self.cam_stop and self.is_traffic_fresh()
+
     def update_final_wps(self):
         if not self.init:
             rospy.logerr('not init')
@@ -219,7 +234,7 @@ class WaypointUpdater(object):
                 return
         elif self.state == CROSS:
             if self.in_camera_interval():  # If we pass this mark either stop or run. Never go back to cross.
-                if not self.cam_stop:
+                if self.is_really_green():
                     self.state = RUN
                     rospy.logerr("Green light switching to RUN- take off!")
                     return
@@ -228,8 +243,7 @@ class WaypointUpdater(object):
                     rospy.logerr("Switching to stop mode")
                     return
         elif self.state == STOP:
-            # if not self.cam_stop:
-            if self.first_green_after_red and self.is_traffic_fresh() and self.close_to_white_lane():
+            if self.is_really_green():
                 rospy.logerr("First Green light, takeoff!")
                 self.state = RUN
                 return

@@ -30,9 +30,9 @@ class TLDetector(object):
         self.y = None
         self.counter = 0
 
-        self.start_x_light = [1130.0, 1545.0, 2119.0, 2173.0, 1470.0, 815.0, 155.0, 345.0]
+        self.start_x_light = [1130.0, 1545.0, 2119.0, 2170.0, 1470.0, 815.0, 155.0, 345.0]
         self.end_x_light = [1145.0, 1560.0, 2121.0, 2175.0, 1492.0, 821.0, 161.0, 351.0]
-        self.start_y_light = [1183.0, 1150.0, 1470.0, 1723.0, 2900.0, 2890.0, 2280.0, 1550.0]
+        self.start_y_light = [1183.0, 1150.0, 1440.0, 1723.0, 2900.0, 2890.0, 2280.0, 1550.0]
         self.end_y_light = [1184.0, 1173.0, 1550.0, 1790.0, 3000.0, 2920.0, 2320.0, 1590.0]
         self.pre = 0.2
         self.pos = 1  # 5 meters tolerance will serve for classificator lag/latency
@@ -40,7 +40,7 @@ class TLDetector(object):
 
         self.crop_1_x = [360, 300, 340, 330, 100, 000, 000, 000]
         self.crop_2_x = [470, 440, 680, 660, 800, 800, 800, 800]
-        self.crop_1_y = [220, 210, 200, 180, 050, 000, 000, 000]
+        self.crop_1_y = [220, 210, 170, 180, 050, 000, 000, 000]
         self.crop_2_y = [345, 400, 380, 340, 300, 600, 600, 600]
 
         self.first = True
@@ -76,14 +76,14 @@ class TLDetector(object):
             reds = self.red_count(roi)
             if reds >= RED_THRESHOLD:
                 self.upcoming_red_light_pub.publish(Int32(1))
-                # cv2.imwrite(
-                #     '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
-                #         self.y) + '_' + str(l_id) + '_' + str(reds) + '_RED' + '.jpeg', roi)
+                cv2.imwrite(
+                    '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
+                        self.y) + '_' + str(l_id) + '_' + str(reds) + '_RED' + '.jpeg', roi)
                 self.counter += 1
             else:
-                # cv2.imwrite(
-                #     '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
-                #         self.y) + '_' + str(l_id) + '_' + str(reds) + '_GREEN' + '.jpeg', roi)
+                cv2.imwrite(
+                    '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
+                        self.y) + '_' + str(l_id) + '_' + str(reds) + '_GREEN' + '.jpeg', roi)
                 self.upcoming_red_light_pub.publish(Int32(-1))
         except CvBridgeError, e:
             rospy.logerr('error %s', e)

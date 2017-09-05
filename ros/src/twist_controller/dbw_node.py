@@ -103,14 +103,15 @@ class DBWNode(object):
             if current_velocity - target_velocity > 1 or throttle <= 0:  # or target_velocity <= 2
                 throttle = 0
                 brake = 5000
-                rospy.logerr("Current Velocity %s, Target Velocity %s, Throttle %s, Brake %s", current_velocity,
-                             target_velocity, throttle, brake)
+                # rospy.logerr("Current Velocity %s, Target Velocity %s, Throttle %s, Brake %s", current_velocity,
+                #              target_velocity, throttle, brake)
 
-            if target_velocity < 0.06:
+            if target_velocity < 0.08:
+                throttle = 0
                 brake = 20000
-                rospy.logerr("ROUGH BRAKE. Current Velocity %s, Target Velocity %s, Throttle %s, Brake %s",
-                             current_velocity,
-                             target_velocity, throttle, brake)
+                # rospy.logerr("ROUGH BRAKE. Current Velocity %s, Target Velocity %s, Throttle %s, Brake %s",
+                #              current_velocity,
+                #              target_velocity, throttle, brake)
             self.counter += 1
             self.publish(throttle, brake, steer)
             rate.sleep()
