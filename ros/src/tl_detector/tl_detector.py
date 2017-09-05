@@ -1,15 +1,11 @@
 #!/usr/bin/env python
 import rospy
 from std_msgs.msg import Int32
-from geometry_msgs.msg import PoseStamped, Pose
-from styx_msgs.msg import TrafficLightArray, TrafficLight
+from geometry_msgs.msg import PoseStamped
 from styx_msgs.msg import Lane
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
-from light_classification.tl_classifier import TLClassifier
-import tf
 import cv2
-from traffic_light_config import config
 
 STATE_COUNT_THRESHOLD = 3
 
@@ -34,7 +30,7 @@ class TLDetector(object):
         self.y = None
         self.counter = 0
 
-        self.start_x_light = [1130.0, 1545.0, 2119.0, 2173.0, 1480.0, 815.0, 155.0, 345.0]
+        self.start_x_light = [1130.0, 1545.0, 2119.0, 2173.0, 1470.0, 815.0, 155.0, 345.0]
         self.end_x_light = [1145.0, 1560.0, 2121.0, 2175.0, 1492.0, 821.0, 161.0, 351.0]
         self.start_y_light = [1183.0, 1150.0, 1470.0, 1723.0, 2900.0, 2890.0, 2280.0, 1550.0]
         self.end_y_light = [1184.0, 1173.0, 1550.0, 1790.0, 3000.0, 2920.0, 2320.0, 1590.0]
@@ -42,12 +38,13 @@ class TLDetector(object):
         self.pos = 1  # 5 meters tolerance will serve for classificator lag/latency
         self.y_tol = 10
 
-        self.crop_1_x = [360, 300, 340, 330, 000, 000, 000, 000]
+        self.crop_1_x = [360, 300, 340, 330, 100, 000, 000, 000]
         self.crop_2_x = [470, 440, 680, 660, 800, 800, 800, 800]
-        self.crop_1_y = [220, 210, 220, 180, 000, 000, 000, 000]
-        self.crop_2_y = [345, 400, 380, 340, 500, 600, 600, 600]
+        self.crop_1_y = [220, 210, 200, 180, 050, 000, 000, 000]
+        self.crop_2_y = [345, 400, 380, 340, 300, 600, 600, 600]
 
         self.first = True
+        self.long_sleep_rate = rospy.Rate(1)
 
         rospy.spin()
 
@@ -66,6 +63,7 @@ class TLDetector(object):
             return
         l_id = self.near_light_id()
         if l_id is None:
+            self.long_sleep_rate.sleep()
             # self.upcoming_red_light_pub.publish(Int32(0)) If there is no information
             return
         if self.first:
@@ -79,8 +77,8 @@ class TLDetector(object):
             if reds >= RED_THRESHOLD:
                 self.upcoming_red_light_pub.publish(Int32(1))
                 # cv2.imwrite(
-                # '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
-                #     self.y) + '_' + str(l_id) + '_' + str(reds) + '_RED' + '.jpeg', roi)
+                #     '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
+                #         self.y) + '_' + str(l_id) + '_' + str(reds) + '_RED' + '.jpeg', roi)
                 self.counter += 1
             else:
                 # cv2.imwrite(
@@ -101,8 +99,8 @@ class TLDetector(object):
                     return i
         return None
 
-    # The quality must be set to Fantastic in the simulator!
-    def red_count(self, img):
+    @staticmethod
+    def red_count(img):
         height, width, _ = img.shape
         count = 0
         for i in range(height):
@@ -110,12 +108,7 @@ class TLDetector(object):
                 b = int(img[i][j][0])
                 g = int(img[i][j][1])
                 r = int(img[i][j][2])
-                # if r > 220 and g < 70 and b < 50:
-                # if b > 200 and g < 110 and r < 105:
-                # if b > 200 and g < 110 and r < 105:
-                # if b > 170 and g < 70:
                 if b > 165 and g < 80 and r < 80:
-                    # if b > 200 and g < 80 and r < 80:
                     count += 1
                     if count > RED_THRESHOLD:  # early stop
                         return count

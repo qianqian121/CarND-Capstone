@@ -1,37 +1,11 @@
 #!/usr/bin/env python
 
-import math
 import rospy
-from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd, SteeringReport
-from geometry_msgs.msg import TwistStamped, PoseStamped
-from std_msgs.msg import Bool
-
-from twist_controller import Controller
-from yaw_controller import YawController
+from dbw_mkz_msgs.msg import ThrottleCmd, SteeringCmd, BrakeCmd
+from geometry_msgs.msg import TwistStamped
 from pid import PID
-
-'''
-You can build this node only after you have built (or partially built) the `waypoint_updater` node.
-
-You will subscribe to `/twist_cmd` message which provides the proposed linear and angular velocities.
-You can subscribe to any other message that you find important or refer to the document for list
-of messages subscribed to by the reference implementation of this node.
-
-One thing to keep in mind while building this node and the `twist_controller` class is the status
-of `dbw_enabled`. While in the simulator, its enabled all the time, in the real car, that will
-not be the case. This may cause your PID controller to accumulate error because the car could
-temporarily be driven by a human instead of your controller.
-
-We have provided two launch files with this node. Vehicle specific values (like vehicle_mass,
-wheel_base) etc should not be altered in these files.
-
-We have also provided some reference implementations for PID controller and other utility classes.
-You are free to use them or build your own.
-
-Once you have the proposed throttle, brake, and steer values, publish it on the various publishers
-that we have created in the `__init__` function.
-
-'''
+from std_msgs.msg import Bool
+from yaw_controller import YawController
 
 
 class DBWNode(object):
@@ -64,39 +38,32 @@ class DBWNode(object):
 
         self.yaw_controller = YawController(wheel_base, steer_ratio, min_speed, max_lat_accel, max_steer_angle)
 
-        self.pid = PID(2, 0.01, 0.0)
+        self.pid = PID(2, 0.01, 0.005)
 
-        # TODO: Create `TwistController` object
-        # self.controller = TwistController(<Arguments you wish to provide>)
-
-        # TODO: Subscribe to all the topics you need to
+        rospy.Subscriber('/vehicle/dbw_enabled', Bool, self.dbw_cb)
         rospy.Subscriber('/current_velocity', TwistStamped, self.current_cb)
         rospy.Subscriber('/twist_cmd', TwistStamped, self.target_cb)
-        rospy.loginfo("Should be subscribed dbw node!")
 
         self.counter = 0
 
         self.loop()
 
     def current_cb(self, msg):
-        rospy.loginfo("Updating current twist!")
         self.current_twist = msg
 
     def target_cb(self, msg):
-        rospy.loginfo("Updating target twist!")
         self.target_twist = msg
 
+    def dbw_cb(self, msg):
+        rospy.logerr("Resting PID, dbw not enabled!")
+        enabled = bool(msg.data)
+        if not enabled:
+            rospy.logerr("Reseting PID, dbw not enabled!")
+            self.pid.reset()
+
     def loop(self):
-        rate = rospy.Rate(30)  # 50Hz
+        rate = rospy.Rate(50)  # 50Hz
         while not rospy.is_shutdown():
-            # TODO: Get predicted throttle, brake, and steering using `twist_controller`
-            # You should only publish the control commands if dbw is enabled
-            # throttle, brake, steering = self.controller.control(<proposed linear velocity>,
-            #                                                     <proposed angular velocity>,
-            #                                                     <current linear velocity>,
-            #                                                     <dbw status>,
-            #                                                     <any other argument you need>)
-            # if <dbw is enabled>:
             throttle = 0.00  # base throttle
             brake = 0.0
             steer = 0.0
@@ -119,6 +86,8 @@ class DBWNode(object):
                              current_angular_velocity, target_angular_velocity,
                              abs(current_angular_velocity - target_angular_velocity))
                 steer *= 5
+            elif target_angular_velocity > 0.1:  # lane drift
+                steer *= 1.5
 
             error = (target_velocity - current_velocity) / 6  # 8 m/s -> 17 mph
 
@@ -133,14 +102,15 @@ class DBWNode(object):
 
             if current_velocity - target_velocity > 1 or throttle <= 0:  # or target_velocity <= 2
                 throttle = 0
-                brake = 5000  # 20000 is apparent max
-                # brake = 15000  # 20000 is apparent max
+                brake = 5000
+                rospy.logerr("Current Velocity %s, Target Velocity %s, Throttle %s, Brake %s", current_velocity,
+                             target_velocity, throttle, brake)
 
-            # if self.counter % 10 == 0:
-            #     rospy.logerr("Current Velocity %s, Target Velocity %s, Throttle %s, Brake %s", current_velocity,
-            #                  target_velocity, throttle, brake)
             if target_velocity < 0.06:
                 brake = 20000
+                rospy.logerr("ROUGH BRAKE. Current Velocity %s, Target Velocity %s, Throttle %s, Brake %s",
+                             current_velocity,
+                             target_velocity, throttle, brake)
             self.counter += 1
             self.publish(throttle, brake, steer)
             rate.sleep()
