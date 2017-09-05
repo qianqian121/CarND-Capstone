@@ -1,60 +1,33 @@
 #!/usr/bin/env python
 
-import rospy
-from styx_msgs.msg import Lane, Waypoint, TrafficLight, TrafficLightArray
 import copy
-from geometry_msgs.msg import TwistStamped, PoseStamped
-
 import math
+import time
 
-'''
-This node will publish waypoints from the car's current position to some `x` distance ahead.
-
-As mentioned in the doc, you should ideally first implement a version which does not care
-about traffic lights or obstacles.
-
-Once you have created dbw_node, you will update this node to use the status of traffic lights too.
-
-Please note that our simulator also provides the exact location of traffic lights and their
-current status in `/vehicle/traffic_lights` message. You can use this message to build this node
-as well as to verify your TL classifier.
-
-TODO (for Yousuf and Aaron): Stopline location for each traffic light.
-'''
+import rospy
+from geometry_msgs.msg import TwistStamped, PoseStamped
+from std_msgs.msg import Int32
+from styx_msgs.msg import Lane
 
 LOOKAHEAD_WPS = 200  # Number of waypoints we will publish. You can change this number
-GREEN_LIGHT = 2
-RED_LIGHT = 0
 CRUISE = 0
 CROSS = 1
 STOP = 2
 RUN = 3
-CRUISE_SPEED = 12
-CROSS_SPEED = 4
-RUN_SPEED = 14
-GO_STOP_N_WPS = 5
-SPEED_THRESHOLD = 1
-STOP_WPS = 100  # Fixed length stop waypoint
+CRUISE_SPEED = 4.4
+CROSS_SPEED = 3
+RUN_SPEED = CRUISE_SPEED
+STOP_WPS = 100  # Fixed length stop waypoints speeds
 
 
 class WaypointUpdater(object):
-    """The purpose of this node is to publish a fixed number of waypoints ahead
-    of the vehicle with the correct target velocities, depending on traffic
-    lights and obstacles."""
-
     def __init__(self):
         rospy.init_node('waypoint_updater', log_level=rospy.DEBUG)
 
         rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
         rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
         rospy.Subscriber('/current_velocity', TwistStamped, self.current_cb)
-
-        # TODO: Add a subscriber for /traffic_waypoint and /obstacle_waypoint below
-        # FIXME: They will be used later
-        # rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
-        # rospy.Subscriber('/obstacle_waypoint', Int32, self.obstacle_cb)
-        rospy.Subscriber('/vehicle/traffic_lights', TrafficLightArray, self.traffic_sim_cb)
-
+        rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
 
         self.init = False
@@ -65,19 +38,32 @@ class WaypointUpdater(object):
         self.speed = None
 
         # lights and light wps
-        self.lights = None  # Update status and position initially
-        self.K = None  # Number of crosses
-        self.light_wps_ids = []  # Instead of light wp, we want cross wp 30 meters earlier than the light
+        self.light_wp_id = None
+        self.light_pos = (20.991, 22.837)
+        self.start_x_light = -0.837
+        self.end_x_light = 8.95
 
         # state logic
         self.state = CRUISE
         self.cross_id = None
         self.cross_wp = None
         self.car_wp = None
-        self.color = None
 
         # stop
         self.stop = False
+        self.white_line_wp_id = None  # Let's guess 5 WPS less than light wps
+
+        # CV
+        self.cam_stop = True  # start red
+        self.first_green_after_red = False
+        self.last_traffic_update = None
+        self.last_wp_tl = None
+
+        # for debug messages
+        self.counter = 0
+
+        self.stop_speeds = []  # list of 100 WPS speeds
+        self.calculate_stop_speeds()
 
         self.loop()
 
@@ -90,27 +76,58 @@ class WaypointUpdater(object):
         self.wps = msg
         self.N = len(self.wps.waypoints)
         for wp in self.wps.waypoints:
-            wp.twist.twist.linear.x = CRUISE_SPEED  # set to 17 MPH, no more than this
+            wp.twist.twist.linear.x = CRUISE_SPEED
+        self.set_all_cross_wps()
 
     def current_cb(self, msg):
         self.speed = msg.twist.linear.x
 
     def traffic_cb(self, msg):
-        pass
+        self.last_traffic_update = time.clock()
+        self.last_wp_tl = self.car_wp
+        if int(msg.data) == 1:
+            self.cam_stop = True
+            # rospy.logerr('red light')
+        else:
+            # rospy.logerr('green light')
+            if self.cam_stop:
+                self.first_green_after_red = True  # Start only after the first Green - Latency issues.
+            else:
+                self.first_green_after_red = False
+            self.cam_stop = False
+        if self.wps is not None and self.current_pose is not None:
+            self.init = True
 
-    def traffic_sim_cb(self, msg):
-        if self.current_pose is None or self.wps is None:
-            return
-        self.lights = msg.lights
-        if not self.init:
-            self.set_all_cross_wps()
-        self.init = True
-
-    def dist(self, a_x, a_y, b_x, b_y):
+    @staticmethod
+    def dist(a_x, a_y, b_x, b_y):
         return math.sqrt((a_x - b_x) ** 2 + (a_y - b_y) ** 2)
 
+    def calculate_stop_speeds(self):
+        v0 = CROSS_SPEED
+        for i in range(STOP_WPS):
+            speed = v0 - v0 * i / float(STOP_WPS - 1)
+            self.stop_speeds.append(speed)
+
+    def is_traffic_fresh(self):
+        if time.clock() - self.last_traffic_update < 0.3:  # with 1 it was never stale
+            return True
+        rospy.logerr("Stale traffic light info")
+        return False
+
+    def is_traffic_info_same_wp(self):
+        if self.car_wp == self.last_wp_tl:
+            return True  # Only pay attentions to traffic information coming in the same wp
+        rospy.logerr("Way past CVs, car wp: %s, tl cv wp: %s", self.car_wp, self.last_wp_tl)
+        return False
+
+    def close_to_white_lane(self):
+        if abs(self.car_wp - self.white_line_wp_id) < 20:
+            return True
+        rospy.logerr("We're not near white line yet")
+        return False
+
     def get_closest_wp_index(self, x, y):
-        max_distance_so_far = 50000  # 50000 meters away
+        max_distance_so_far = 100
         best_i = None
         for i in range(self.N):
             wp = self.wps.waypoints[i]
@@ -121,29 +138,17 @@ class WaypointUpdater(object):
         return best_i
 
     def set_all_cross_wps(self):
-        self.K = len(self.lights)
-        for i in range(self.K):
-            light = self.lights[i]
-            self.light_wps_ids.append(self.get_closest_wp_index(
-                light.pose.pose.position.x,
-                light.pose.pose.position.y))
-
-    def get_approach_speeds(self):
-        v0 = 2
-        v = []
-        for i in range(STOP_WPS):
-            v.append(v0 - v0 * i / float(STOP_WPS - 1))
-        return v
+        self.light_wp_id = self.get_closest_wp_index(self.light_pos[0], self.light_pos[1])
+        self.white_line_wp_id = self.light_wp_id - 5  # Just guessing!
 
     def nearest_cross_id(self):
-        for i in range(self.K):
-            cross_wp = self.wps.waypoints[self.light_wps_ids[i]]
-            distance_to_start_cross = self.dist(cross_wp.pose.pose.position.x,
-                                                cross_wp.pose.pose.position.y,
-                                                self.current_pose.pose.position.x,
-                                                self.current_pose.pose.position.y)
-            if distance_to_start_cross < 80:  # meters
-                return i
+        cross_wp = self.wps.waypoints[self.light_wp_id]
+        distance_to_start_cross = self.dist(cross_wp.pose.pose.position.x,
+                                            cross_wp.pose.pose.position.y,
+                                            self.current_pose.pose.position.x,
+                                            self.current_pose.pose.position.y)
+        if distance_to_start_cross < 70:
+            return 0
         return None
 
     def cross_distance(self):
@@ -158,11 +163,9 @@ class WaypointUpdater(object):
         self.car_wp = self.get_closest_wp_index(self.current_pose.pose.position.x, self.current_pose.pose.position.y)
         self.cross_id = self.nearest_cross_id()
         if self.cross_id is not None:
-            self.cross_wp = self.wps.waypoints[self.light_wps_ids[self.cross_id]]
-            self.color = int(self.lights[self.cross_id].state)
+            self.cross_wp = self.wps.waypoints[self.light_wp_id]
         else:
             self.cross_wp = None
-            self.color = None
 
     def set_final_wps(self):
         wps = []
@@ -174,30 +177,48 @@ class WaypointUpdater(object):
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
                 wps[-1].twist.twist.linear.x = CROSS_SPEED
         elif self.state == STOP:
-            speeds = self.get_approach_speeds()
-            for i in range(STOP_WPS):
+            m = self.white_line_wp_id - self.car_wp
+            if m <= 0:
+                rospy.logerr("Error, in stop mode, m < 0, passed cross?")
+                return
+            for i in range(m):
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
-                wps[-1].twist.twist.linear.x = speeds[i]
-                rospy.logerr("Stop speed: %s ", wps[-1].twist.twist.linear.x)
+                wps[-1].twist.twist.linear.x = self.stop_speeds[STOP_WPS - m + i]
         elif self.state == RUN:
             for i in range(LOOKAHEAD_WPS):  # cross mode ENDS at stop_wp
                 wps.append(copy.deepcopy(self.wps.waypoints[self.car_wp + i]))
                 wps[-1].twist.twist.linear.x = RUN_SPEED
         self.final_wps = wps
 
+    def in_camera_interval(self):
+        if self.cross_id is None:
+            rospy.logerr('What? No light id!')
+        x = self.current_pose.pose.position.x
+        margin = 0
+        if self.start_x_light + margin < x < self.end_x_light:
+            rospy.logerr('In camera range for light: %s', self.cross_id)
+            return True
+        return False
+
+    def is_really_green(self):
+        return self.first_green_after_red and self.is_traffic_fresh() \
+               and self.close_to_white_lane() and self.is_traffic_info_same_wp() and not self.cam_stop
+
     def update_final_wps(self):
         if not self.init:
+            rospy.logerr('not init')
             return
         self.update_state_values()
+        if self.counter % 10 == 0:
+            rospy.logerr('wp: %s', self.car_wp)
         if self.state == CRUISE:
             if self.cross_id is not None:
                 self.state = CROSS
                 rospy.logerr("Switching from Cruise to Near Cross")
                 return
         elif self.state == CROSS:
-            # Add wps if going slow to stop_go_wp
-            if self.cross_distance() < 40:  # If we pass this mark either stop or run. Never go back to cross.
-                if self.color != RED_LIGHT:
+            if self.in_camera_interval():  # If we pass this mark either stop or run. Never go back to cross.
+                if self.is_really_green():
                     self.state = RUN
                     rospy.logerr("Green light switching to RUN- take off!")
                     return
@@ -206,14 +227,10 @@ class WaypointUpdater(object):
                     rospy.logerr("Switching to stop mode")
                     return
         elif self.state == STOP:
-            if self.color == GREEN_LIGHT:
-                rospy.logerr("Green light, takeoff!")
+            if self.is_really_green():
+                rospy.logerr("First Green light, takeoff!")
                 self.state = RUN
                 return
-            if self.stop:
-                rospy.logerr("Only need to stop once, traffic light id: %s", self.cross_id)
-                return
-            self.stop = True
         elif self.state == RUN:
             self.stop = False
             if self.cross_id is None:
@@ -223,9 +240,9 @@ class WaypointUpdater(object):
         self.set_final_wps()
 
     def loop(self):
-        """Publish the final waypoints."""
         rate = rospy.Rate(50)
         while not rospy.is_shutdown():
+            self.counter += 1
             self.update_final_wps()
             if self.final_wps is not None:
                 lane = Lane()
@@ -241,4 +258,3 @@ if __name__ == '__main__':
         WaypointUpdater()
     except rospy.ROSInterruptException:
         rospy.logerr('Could not start waypoint updater node.')
-

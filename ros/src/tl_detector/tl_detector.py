@@ -76,14 +76,14 @@ class TLDetector(object):
             reds = self.red_count(roi)
             if reds >= RED_THRESHOLD:
                 self.upcoming_red_light_pub.publish(Int32(1))
-                cv2.imwrite(
-                    '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
-                        self.y) + '_' + str(l_id) + '_' + str(reds) + '_RED' + '.jpeg', roi)
+                # cv2.imwrite(
+                #     '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
+                #         self.y) + '_' + str(l_id) + '_' + str(reds) + '_RED' + '.jpeg', roi)
                 self.counter += 1
             else:
-                cv2.imwrite(
-                    '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
-                        self.y) + '_' + str(l_id) + '_' + str(reds) + '_GREEN' + '.jpeg', roi)
+                # cv2.imwrite(
+                #     '/home/crised/sdcnd/term3/pics/' + str(self.counter) + '_' + str(self.x) + '_' + str(
+                #         self.y) + '_' + str(l_id) + '_' + str(reds) + '_GREEN' + '.jpeg', roi)
                 self.upcoming_red_light_pub.publish(Int32(-1))
         except CvBridgeError, e:
             rospy.logerr('error %s', e)

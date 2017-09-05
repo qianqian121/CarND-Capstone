@@ -14,18 +14,13 @@ CRUISE = 0
 CROSS = 1
 STOP = 2
 RUN = 3
-CRUISE_SPEED = 6  # 12
+CRUISE_SPEED = 4.4
 CROSS_SPEED = 3
-RUN_SPEED = 8
-SPEED_THRESHOLD = 1
+RUN_SPEED = 6
 STOP_WPS = 100  # Fixed length stop waypoints speeds
 
 
 class WaypointUpdater(object):
-    """The purpose of this node is to publish a fixed number of waypoints ahead
-    of the vehicle with the correct target velocities, depending on traffic
-    lights and obstacles."""
-
     def __init__(self):
         rospy.init_node('waypoint_updater', log_level=rospy.DEBUG)
 
@@ -124,7 +119,7 @@ class WaypointUpdater(object):
     def is_traffic_info_same_wp(self):
         if self.car_wp == self.last_wp_tl:
             return True  # Only pay attentions to traffic information coming in the same wp
-        rospy.logerr("Waay past CVs, car wp: %s, tl cv wp: %s", self.car_wp, self.last_wp_tl)
+        rospy.logerr("Way past CVs, car wp: %s, tl cv wp: %s", self.car_wp, self.last_wp_tl)
         return False
 
     def close_to_white_lane(self):
@@ -217,9 +212,6 @@ class WaypointUpdater(object):
         return self.first_green_after_red and self.is_traffic_fresh() \
                and self.close_to_white_lane() and self.is_traffic_info_same_wp() and not self.cam_stop
 
-    def is_really_red(self):
-        return self.cam_stop and self.is_traffic_fresh()
-
     def update_final_wps(self):
         if not self.init:
             rospy.logerr('not init')
@@ -256,7 +248,6 @@ class WaypointUpdater(object):
         self.set_final_wps()
 
     def loop(self):
-        """Publish the final waypoints."""
         rate = rospy.Rate(50)
         while not rospy.is_shutdown():
             self.counter += 1
